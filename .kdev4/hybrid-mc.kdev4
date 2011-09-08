@@ -1,0 +1,12 @@
+[CMake]
+BuildDirs=/home/greg/projects/hybrid-mc/build
+CMakeDir=/usr/share/cmake-2.8/Modules
+Current CMake Binary=file:///usr/bin/cmake
+CurrentBuildDir=file:///home/greg/projects/hybrid-mc/build
+CurrentBuildType=Debug
+CurrentInstallDir=file:///usr/local
+Extra Arguments=
+ProjectRootRelative=./
+
+[MakeBuilder]
+Number Of Jobs=1
