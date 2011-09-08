@@ -83,9 +83,9 @@ template<class TParams, class TLogger>
 inline double THybridMC<TParams, TLogger>::delE_delqi(double eta, size_t i) {
 	double q_i_tmp = q[i];
 	q[i] += eta/10.;
-	double delta_E = log_pdf(q, dim, params);
+	double delta_E = -log_pdf(q, dim, params);
 	q[i] = q_i_tmp - eta/10.;
-	delta_E -= log_pdf(q, dim, params);
+	delta_E -= -log_pdf(q, dim, params);
 	q[i] = q_i_tmp;
 	return 5.*delta_E/eta;
 }
