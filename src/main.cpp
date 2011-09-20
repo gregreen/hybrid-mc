@@ -3,6 +3,8 @@
 #include <math.h>
 
 #include "hybridmc.h"
+#include "binner.h"
+#include "stats.h"
 
 #define sqr(x) ((x)*(x))
 
@@ -24,9 +26,14 @@ struct TSHO {
 };
 
 double negE_SHO(const double *const q, size_t dim, TSHO &params) {
-	double E = 0.;
-	for(size_t i=0; i<dim; i++) { E += 0.5*params.w2[i]*sqr(q[i]-params.q_0[i]); }
-	return -E;
+	double p = 0.;
+	double tmp = 0.;
+	for(size_t i=0; i<dim; i++) { tmp += 0.5*params.w2[i]*sqr(q[i]-params.q_0[i]); }
+	p += exp(-tmp);
+	tmp = 0;
+	for(size_t i=0; i<dim; i++) { tmp += 0.5*params.w2[i]*sqr(q[i]+params.q_0[i]); }	// Mirror potential
+	p += exp(-tmp);
+	return log(p);
 }
 
 double rand_state(double *q, size_t dim, gsl_rng *r, TSHO &params) {
@@ -34,17 +41,55 @@ double rand_state(double *q, size_t dim, gsl_rng *r, TSHO &params) {
 }
 
 int main(int argc, char **argv) {
+	unsigned int N_threads = 6;
+	unsigned int N_burn_in = 1000;
+	unsigned int N_steps = 500;
+	unsigned int N_rounds = 10;
+	double eta = 0.2;
+	unsigned int L = 50;
+	double target_acceptance = 0.75;
+	
 	TSHO sho;
 	
-	sho.add_oscillator(0., 1.);
-	sho.add_oscillator(1., 2.);
-	sho.add_oscillator(-1., 3.);
+	sho.add_oscillator(3., 1.);
+	sho.add_oscillator(4., 1./2.);
+	sho.add_oscillator(-3., 1./3.);
 	
-	double logger;
+	double min[3] = {-10, -10, -10};
+	double max[3] = {10, 10, 10};
+	unsigned int width[3] = {100, 100, 100};
+	TBinnerND logger(&min[0], &max[0], &width[0], 3);
+	TStats stats(3);
 	
-	THybridMC<TSHO, double> hmc(sho.dim, negE_SHO, rand_state, sho, logger);
+	TParallelHybridMC<TSHO, TBinnerND> hmc(N_threads, sho.dim, negE_SHO, rand_state, sho, logger, stats);
 	
-	hmc.leapfrog(100, 0.01);
+	hmc.tune(L, eta, target_acceptance, 30);
+	cout << endl << "eta -> " << eta << endl;
+	cout << "Empirical acceptance rate = " << hmc.acceptance_rate() << "\t(target = " << target_acceptance << ")" << endl << endl;
+	hmc.clear_acceptance_rate();
+	
+	hmc.step_multiple(N_burn_in, L, eta, false);
+	//hmc.update_stats();
+	cout << "Burn-in acceptance rate: " << hmc.acceptance_rate() << endl << endl;
+	
+	hmc.tune(L, eta, target_acceptance, 30);
+	cout << "eta -> " << eta << endl;
+	cout << "Empirical acceptance rate = " << hmc.acceptance_rate() << "\t(target = " << target_acceptance << ")" << endl << endl;
+	hmc.clear_acceptance_rate();
+	
+	for(unsigned int n=0; n<N_rounds; n++) {
+		cout << "===========================================================" << endl;
+		cout << "|| n = " << n+1 << endl;
+		cout << "===========================================================" << endl << endl;
+		hmc.step_multiple(N_steps, L, eta, true);
+		hmc.update_stats();
+		hmc.calc_GR_stat();
+		cout << "Gelman-Rubin diagnostic:";
+		for(unsigned int i=0; i<3; i++) { cout << " " << setprecision(5) << hmc.get_GR_stat(i); }
+		cout << endl << "Acceptance rate: " <<  hmc.acceptance_rate() << endl;
+		stats.print();
+		cout << endl << endl;
+	}
 	
 	return 0;
 }
