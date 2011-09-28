@@ -44,6 +44,9 @@ public:
 	void tune(unsigned int &L, double &eta, double target_acceptance, unsigned int N_rounds=20);	// Tune L and eta to achieve the desired acceptance rate
 	void flush();											// Log the current state
 	
+	// Testing functions
+	void test_integration(double *q_0, double *p_0, unsigned int L, double eta);
+	
 	// Accessors
 	double acceptance_rate();
 	void clear_acceptance_rate();
@@ -140,6 +143,9 @@ void TParallelHybridMC<TParams, TLogger>::step(unsigned int L, double eta, bool 
 
 template<class TParams, class TLogger>
 void TParallelHybridMC<TParams, TLogger>::tune(unsigned int &L, double &eta, double target_acceptance, unsigned int N_rounds) {
+	double new_eta = 0.;
+	unsigned int new_L = 0;
+	
 	#pragma omp parallel num_threads(N_hmc)
 	{
 		unsigned int L_i = L;
@@ -148,15 +154,18 @@ void TParallelHybridMC<TParams, TLogger>::tune(unsigned int &L, double &eta, dou
 		
 		hmc[thread_ID]->tune(L_i, eta_i, target_acceptance, N_rounds);
 		
-		#pragma omp atomic
-		L += L_i;
+		#pragma omp critical (cout)
+		std::cout << "eta[" << thread_ID << "] = " << eta_i << std::endl;
 		
 		#pragma omp atomic
-		eta += eta_i;
+		new_L += L_i;
+		
+		#pragma omp atomic
+		new_eta += eta_i;
 	}
 	
-	L /= (double)N_hmc;
-	eta /= (double)N_hmc;
+	L = new_L / N_hmc;
+	eta = new_eta/(double)N_hmc;
 }
 
 template<class TParams, class TLogger>
@@ -245,18 +254,22 @@ void THybridMC<TParams, TLogger>::step(unsigned int L, double eta, bool log_step
 	// Draw a new momentum from a Gaussian distribution
 	draw_p();
 	// Calculate the initial energy
-	double Delta_H = H();
-	// Leapfrog integrate either forwards or backwards to generate (q', p')
+	double Delta_H = -H();
+	// Leapfrog integrate forward in time to generate (q', p')
 	leapfrog(L, eta);
 	//if(gsl_rng_uniform(r) < 0.5) { leapfrog(L, eta); } else { leapfrog(L, -eta); }
-	// Calculate initial - final energy = H - H'
-	Delta_H -= H_prime();
+	// Calculate increase in energy = H' - H
+	Delta_H += H_prime();
 	// Accept with probability min(1, exp(H - H'))
 	bool accept = false;
-	if(Delta_H > 0) {
+	if(Delta_H < 0) {
 		accept = true;
-	} else if(gsl_rng_uniform(r) < exp(Delta_H)) {
-		accept = true;
+	} else {
+		double urand = gsl_rng_uniform(r);
+		double prob = exp(-Delta_H);
+		if(urand < prob) {
+			accept = true;
+		}
 	}
 	if(accept) {
 		if(log_step) {
@@ -322,28 +335,40 @@ inline void THybridMC<TParams, TLogger>::leapfrog(unsigned int L, double eta) {
 }
 
 // TODO: Deal with boundaries where E -> +infinity
-// Estimate delE/delq_i by sampling E at q_i +- eta/10
+// Estimate delE/delq_i by sampling E at q_i +- Delta_q
 template<class TParams, class TLogger>
 inline double THybridMC<TParams, TLogger>::delE_delqi(double eta, size_t i, bool use_workspace) {
+	// Determine size of step to determine derivative
+	double delta_q = eta*p_workspace[i]/100.;
+	if(delta_q == 0) { delta_q = eta*0.001; }
+	// Get E(q+delta_q)
 	double q_i_tmp = q_workspace[i];
-	q_workspace[i] += eta/10.;
-	double delta_E = -log_pdf(q_workspace, dim, params);
-	q_workspace[i] = q_i_tmp - eta/10.;
-	delta_E -= -log_pdf(q_workspace, dim, params);
+	q_workspace[i] += delta_q;
+	double Delta_E = -log_pdf(q_workspace, dim, params);
+	// Get E(q-delta_q)
+	q_workspace[i] = q_i_tmp - delta_q;
+	Delta_E -= -log_pdf(q_workspace, dim, params);
 	q_workspace[i] = q_i_tmp;
-	return 5.*delta_E/eta;
+	// Use finite difference to estimate derivative
+	return Delta_E/(2.*delta_q);
 }
 
 // Overloaded version of above, using q rather than q_workspace
 template<class TParams, class TLogger>
 inline double THybridMC<TParams, TLogger>::delE_delqi(double eta, size_t i) {
+	// Determine size of step to determine derivative
+	double delta_q = eta*p[i]/100.;
+	if(delta_q == 0) { delta_q = eta*0.01; }
+	// Get E(q+delta_q)
 	double q_i_tmp = q[i];
-	q[i] += eta/10.;
+	q[i] += delta_q;
 	double Delta_E = -log_pdf(q, dim, params);
-	q[i] = q_i_tmp - eta/10.;
+	// Get E(q-delta_q)
+	q[i] = q_i_tmp - delta_q;
 	Delta_E += log_pdf(q, dim, params);
 	q[i] = q_i_tmp;
-	return 5.*Delta_E/eta;
+	// Use finite difference to estimate derivative
+	return Delta_E/(2.*delta_q);
 }
 
 template<class TParams, class TLogger>
@@ -352,9 +377,10 @@ double THybridMC<TParams, TLogger>::acceptance_rate() { return (double)N_accepte
 template<class TParams, class TLogger>
 void THybridMC<TParams, TLogger>::clear_acceptance_rate() { N_accepted = 0; N_rejected = 0; }
 
+// Adjust the step size eta to achieve the desired acceptance rate
 template<class TParams, class TLogger>
 void THybridMC<TParams, TLogger>::tune(unsigned int &L, double &eta, double target_acceptance, unsigned int N_rounds) {
-	unsigned int N_steps = (unsigned int)(20./target_acceptance);	// Step enough times to get ~20 acceptances if eta and L are already correct
+	unsigned int N_steps = (unsigned int)(50./target_acceptance);	// Step enough times to get ~50 acceptances if eta and L are already correct
 	double eta_new, lnc, lnp_0;
 	double lnp = log(target_acceptance);
 	double n = 3.;
@@ -369,31 +395,10 @@ void THybridMC<TParams, TLogger>::tune(unsigned int &L, double &eta, double targ
 		} else {
 			double acceptance = acceptance_rate();
 			if(acceptance < 0.9*target_acceptance) {
-				eta *= 0.95;
+				eta *= 0.97;
 			} else if(acceptance > 1.1*target_acceptance) {
-				eta *= 1.05;
+				eta *= 1.03;
 			}
-			/*
-			// The following is based on the model p = c e^(-eta^2) = e^(ln(c) - eta^n)
-			lnp_0 = log(acceptance_rate());
-			lnc = lnp_0 + pow(eta,n);
-			if(lnc < lnp) {		// Acceptance rate is unreachable according to model
-				eta /= 1.1;
-			} else {
-				eta_new = pow(lnc - (lnc - pow(eta,n))*lnp/lnp_0, 1./n);
-				if(isnan(eta_new)) {
-					std::cout << "ln(c) = " << lnc << "\tln(p) = " << lnp << "\teta = " << eta << "\teta_new^n = " << lnc - (lnc - pow(eta,n))*lnp/lnp_0 << std::endl;
-				}
-				// Don't allow eta to swing by more than a factor of two
-				if(eta_new/eta < 0.9) {
-					eta *= 0.9;
-				} else if(eta_new/eta > 1.1) {
-					eta *= 1.1;
-				} else {
-					eta = eta_new;
-				}
-			}
-			*/
 		}
 	}
 }
@@ -408,6 +413,46 @@ void THybridMC<TParams, TLogger>::flush() {
 	
 	weight = 0;
 }
+
+
+
+template<class TParams, class TLogger>
+void THybridMC<TParams, TLogger>::test_integration(double *q_0, double *p_0, unsigned int L, double eta) {
+	// Copy in state (q_0, p_0)
+	for(size_t i=0; i<dim; i++) {
+		q[i] = q_0[i];
+		p[i] = p_0[i];
+	}
+	// Integrate forward L steps
+	double t = 0;
+	for(unsigned int n=0; n<L; n++) {
+		leapfrog(1, eta);
+		// Print out t, q, p
+		t += eta;
+		std::cout << "t = " << t << "\tH = " << H_prime() << std::endl;
+		std::cout << "q = (";
+		for(size_t i=0; i<dim; i++) {
+			std::cout << " " << q_workspace[i];
+		}
+		std::cout << " )" << std::endl;
+		std::cout << "p = (";
+		for(size_t i=0; i<dim; i++) {
+			std::cout << " " << p_workspace[i];
+		}
+		std::cout << " )" << std::endl << std::endl;
+		// Copy (q', p') to (q, p)
+		for(size_t i=0; i<dim; i++) {
+			q[i] = q_workspace[i];
+			p[i] = p_workspace[i];
+		}
+	}
+	// Copy state out to (q_0, p_0)
+	for(size_t i=0; i<dim; i++) {
+		q_0[i] = q[i];
+		p_0[i] = p[i];
+	}	
+}
+
 
 
 // Seed a gsl_rng with the Unix time in nanoseconds
