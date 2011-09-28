@@ -42,21 +42,23 @@ double rand_state(double *q, size_t dim, gsl_rng *r, TSHO &params) {
 }
 
 int main(int argc, char **argv) {
-	unsigned int N_threads = 4;
-	unsigned int N_burn_in = 10000;
-	unsigned int N_steps = 1000;
-	unsigned int N_rounds = 10;
+	unsigned int N_threads = 7;
+	unsigned int N_burn_in = 1000;
+	unsigned int N_steps = 5000;
+	unsigned int N_rounds = 100;
 	double eta = 0.02;
 	unsigned int L = 20;
-	double target_acceptance = 0.95;
+	double target_acceptance = 0.98;
+	double convergence_threshold = 1.025;
+	string outfile = "bins.txt";
 	
 	TSHO sho;
 	
-	sho.add_oscillator(3., 1.);
-	sho.add_oscillator(4., 1./2.);
-	sho.add_oscillator(-3., 1./3.);
-	sho.weight_1 = 0.95;
-	sho.weight_2 = 0.05;
+	sho.add_oscillator(2., 1./1.);
+	sho.add_oscillator(3., 1./1.);
+	sho.add_oscillator(2., 1./1.);
+	sho.weight_1 = 0.5;
+	sho.weight_2 = 0.5;
 	
 	double min[3] = {-10, -10, -10};
 	double max[3] = {10, 10, 10};
@@ -85,6 +87,8 @@ int main(int argc, char **argv) {
 	cout << "Empirical acceptance rate = " << hmc.acceptance_rate() << "\t(target = " << target_acceptance << ")" << endl << endl;
 	hmc.clear_acceptance_rate();
 	
+	bool converged;
+	double GR_i;
 	for(unsigned int n=0; n<N_rounds; n++) {
 		hmc.step_multiple(N_steps, L, eta, true);
 		hmc.update_stats();
@@ -93,11 +97,19 @@ int main(int argc, char **argv) {
 		cout << "|| n = " << n+1 << endl;
 		cout << "===========================================================" << endl << endl;
 		cout << "Gelman-Rubin diagnostic:";
-		for(unsigned int i=0; i<3; i++) { cout << " " << setprecision(5) << hmc.get_GR_stat(i); }
+		converged = true;
+		for(unsigned int i=0; i<3; i++) {
+			GR_i = hmc.get_GR_stat(i);
+			cout << " " << setprecision(5) << GR_i; 
+			if(GR_i > convergence_threshold) { converged = false; }
+		}
 		cout << endl << "Acceptance rate: " <<  hmc.acceptance_rate() << endl;
 		stats.print();
 		cout << endl << endl;
+		if(converged) { break; }
 	}
+	
+	logger.write_to_file(outfile, true, true);
 	
 	return 0;
 }
