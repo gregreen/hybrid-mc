@@ -38,7 +38,7 @@ double negE_SHO(const double *const q, size_t dim, TSHO &params) {
 }
 
 double rand_state(double *q, size_t dim, gsl_rng *r, TSHO &params) {
-	for(size_t i=0; i<dim; i++) { q[i] = gsl_ran_gaussian_ziggurat(r, 1.); }
+	for(size_t i=0; i<dim; i++) { q[i] = gsl_ran_gaussian_ziggurat(r, 10.); }
 }
 
 int main(int argc, char **argv) {
@@ -54,11 +54,11 @@ int main(int argc, char **argv) {
 	
 	TSHO sho;
 	
-	sho.add_oscillator(2., 1./1.);
-	sho.add_oscillator(3., 1./1.);
-	sho.add_oscillator(2., 1./1.);
-	sho.weight_1 = 0.5;
-	sho.weight_2 = 0.5;
+	sho.add_oscillator(2., 1./1);
+	sho.add_oscillator(3., 1./1);
+	sho.add_oscillator(2., 1./1);
+	sho.weight_1 = 0.8;
+	sho.weight_2 = 0.2;
 	
 	double min[3] = {-10, -10, -10};
 	double max[3] = {10, 10, 10};
