@@ -42,29 +42,40 @@ double rand_state(double *q, size_t dim, gsl_rng *r, TSHO &params) {
 }
 
 int main(int argc, char **argv) {
+	size_t dim = 6;
 	unsigned int N_threads = 7;
 	unsigned int N_burn_in = 1000;
 	unsigned int N_steps = 5000;
 	unsigned int N_rounds = 100;
 	double eta = 0.02;
 	unsigned int L = 20;
-	double target_acceptance = 0.98;
+	double target_acceptance = 0.95;
 	double convergence_threshold = 1.025;
 	string outfile = "bins.txt";
 	
 	TSHO sho;
 	
-	sho.add_oscillator(2., 1./1);
-	sho.add_oscillator(3., 1./1);
-	sho.add_oscillator(2., 1./1);
-	sho.weight_1 = 0.8;
-	sho.weight_2 = 0.2;
+	for(size_t i=0; i<dim; i++) {
+		sho.add_oscillator((double)i, 2./((double)i+1));
+	}
 	
-	double min[3] = {-10, -10, -10};
-	double max[3] = {10, 10, 10};
-	unsigned int width[3] = {100, 100, 100};
-	TBinnerND logger(&min[0], &max[0], &width[0], 3);
-	TStats stats(3);
+	sho.weight_1 = 1.;
+	sho.weight_2 = 0.;
+	
+	double *min = new double[dim];
+	double *max = new double[dim];
+	unsigned int *width = new unsigned int[dim];
+	for(size_t i=0; i<dim; i++) {
+		min[i] = -2.*(double)dim;
+		max[i] = 2.*(double)dim;
+		width[i] = 10;
+	}
+	TBinnerND logger(min, max, width, dim);
+	delete[] min;
+	delete[] max;
+	delete[] width;
+	
+	TStats stats(dim);
 	
 	/*THybridMC<TSHO, TBinnerND> hmc(sho.dim, negE_SHO, rand_state, sho, logger, stats);
 	double q_0[3] = {1., 2., 3.};
@@ -98,7 +109,7 @@ int main(int argc, char **argv) {
 		cout << "===========================================================" << endl << endl;
 		cout << "Gelman-Rubin diagnostic:";
 		converged = true;
-		for(unsigned int i=0; i<3; i++) {
+		for(unsigned int i=0; i<dim; i++) {
 			GR_i = hmc.get_GR_stat(i);
 			cout << " " << setprecision(5) << GR_i; 
 			if(GR_i > convergence_threshold) { converged = false; }
